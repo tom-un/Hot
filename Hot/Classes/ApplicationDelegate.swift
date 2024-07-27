@@ -35,13 +35,11 @@ class ApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var sensorsWindowController:       SensorsWindowController?
     private var selectSensorsWindowController: SelectSensorsWindowController?
     private var sensorViewControllers:         [ SensorViewController  ] = []
-    private var fanViewControllers:            [ FanViewController ] = []
     private var graphWindowController:         GraphWindowController?
     private var exiting                      = false
 
     @IBOutlet private var menu:        NSMenu!
     @IBOutlet private var sensorsMenu: NSMenu!
-    @IBOutlet private var fansMenu:    NSMenu!
     @IBOutlet private var updater:     GitHubUpdater!
 
     @objc public private( set ) dynamic var infoViewController: InfoViewController?
@@ -84,7 +82,6 @@ class ApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             self?.graphWindowController?.availableCPUs   = self?.infoViewController?.availableCPUs   ?? 0
             self?.graphWindowController?.speedLimit      = self?.infoViewController?.speedLimit      ?? 0
             self?.graphWindowController?.temperature     = self?.infoViewController?.temperature     ?? 0
-            self?.graphWindowController?.fanSpeed        = self?.infoViewController?.fanSpeed     ?? 0
             self?.graphWindowController?.thermalPressure = self?.infoViewController?.thermalPressure ?? 0
         }
 
@@ -360,30 +357,18 @@ class ApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         {
             self.sensorsMenu.removeAllItems()
         }
-        if self.fanViewControllers.isEmpty
-        {
-            self.fansMenu.removeAllItems()
-        }
 
         guard let sensors = self.infoViewController?.log.sensors
         else
         {
             return
         }
-        guard let fans = self.infoViewController?.log.fans
-        else
-        {
-            return
-        }
 
         var controllers = self.sensorViewControllers
-        var fanControllers = self.fanViewControllers
         var items       = self.sensorsMenu.items
-        var fanItems    = self.fansMenu.items
 
         controllers.removeAll { item in sensors.contains { $0.key == item.name  } == false }
         items.removeAll       { item in sensors.contains { $0.key == item.title } == false }
-        fanItems.removeAll    { item in fans.contains { $0.key == item.title } == false }
 
         sensors.forEach
         {
@@ -417,41 +402,6 @@ class ApplicationDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         .forEach
         {
             self.sensorsMenu.addItem( $0 )
-        }
-
-        fans.forEach
-        {
-            fan in
-
-            if let controller = self.fanViewControllers.first( where: { $0.name  == fan.key } )
-            {
-                controller.value = Int( fan.value )
-            }
-            else
-            {
-                let controller   = FanViewController()
-                controller.name  = fan.key
-                controller.value = Int( fan.value )
-                let item         = NSMenuItem( title: fan.key, action: nil, keyEquivalent: "" )
-                item.view        = controller.view
-
-                fanItems.append( item )
-                fanControllers.append( controller )
-            }
-        }
-
-        self.fanViewControllers = fanControllers
-
-        self.fansMenu.removeAllItems()
-
-
-        fanItems.sorted
-        {
-            $0.title.compare( $1.title, options: [ .numeric, .caseInsensitive ], range: nil, locale: nil ) == .orderedAscending
-        }
-        .forEach
-        {
-            self.fansMenu.addItem( $0 )
         }
     }
 

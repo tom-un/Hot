@@ -32,24 +32,19 @@ public class ThermalLog: NSObject
     @objc public dynamic var availableCPUs:   NSNumber?
     @objc public dynamic var speedLimit:      NSNumber?
     @objc public dynamic var temperature:     NSNumber?
-    @objc public dynamic var fanSpeed:        NSNumber?
     @objc public dynamic var thermalPressure: NSNumber?
     @objc public dynamic var sensors:         [ String: Double ] = [ : ]
-    @objc public dynamic var fans:            [ String: Double ] = [ : ]
 
     private var refreshing = false
 
     private static var queue = DispatchQueue( label: "com.xs-labs.Hot.ThermalLog", qos: .background, attributes: [], autoreleaseFrequency: .workItem, target: nil )
 
-    private var regexFanRPM: NSRegularExpression
-
     public override init()
     {
-        self.regexFanRPM = try! NSRegularExpression( pattern: "F[0-9]Ac" )
         super.init()
     }
 
-    private func readSensors() -> [ String: ( value: Double, isCPU: Bool, isFan: Bool ) ]
+    private func readSensors() -> [ String: ( temperature: Double, isCPU: Bool ) ]
     {
         let ioHID = IOHID.shared.readTemperatureSensors().compactMap
         {
@@ -58,26 +53,29 @@ public class ThermalLog: NSObject
 
         let smc = SMC.shared.readAllKeys
         {
-            $0 >> 24 == 84 || // T prefix (four char code)
-            $0 >> 24 == 70 // F prefix
+            $0 >> 24 == 84 // T prefix (four char code)
         }
         .compactMap
         {
             self.sensorValue( data: $0 )
         }
 
-        let all = [ ioHID, smc ].flatMap { $0 }
+        let all = [ ioHID, smc ].flatMap { $0 }.filter
+        {
+            $0.1.temperature > 0 && $0.1.temperature < 120
+        }
+
         return Dictionary( uniqueKeysWithValues: all )
     }
 
-    private func sensorValue( data: IOHIDData ) -> ( String, ( value: Double, isCPU: Bool, isFan: Bool ) )?
+    private func sensorValue( data: IOHIDData ) -> ( String, ( temperature: Double, isCPU: Bool ) )?
     {
         let isCPU = data.name.hasPrefix( "pACC" ) || data.name.hasPrefix( "eACC" )
 
-        return ( data.name, ( value: data.value, isCPU: isCPU, isFan: false ) )
+        return ( data.name, ( temperature: data.value, isCPU: isCPU ) )
     }
 
-    private func sensorValue( data: SMCData ) -> ( String, ( value: Double, isCPU: Bool, isFan: Bool ) )?
+    private func sensorValue( data: SMCData ) -> ( String, ( temperature: Double, isCPU: Bool ) )?
     {
         let value: Double
 
@@ -94,7 +92,7 @@ public class ThermalLog: NSObject
             return nil
         }
 
-        return ( data.keyName, ( value: value, isCPU: false, isFan: regexFanRPM.firstMatch(in: data.keyName, range: NSMakeRange(0, data.keyName.count)) != nil ) )
+        return ( data.keyName, ( temperature: value, isCPU: false ) )
     }
 
     public func refresh( completion: @escaping () -> Void )
@@ -118,11 +116,9 @@ public class ThermalLog: NSObject
             #endif
 
             let sensors       = self.readSensors()
-            let cpu           = sensors.filter { $0.value.isCPU }.mapValues { $0.value }
-            let allTemperatures = sensors.filter { $0.value.isFan == false && ($0.value.value > 0 && $0.value.value < 120) }.mapValues { $0.value }
-            let allFans = sensors.filter { $0.value.isFan == true }.mapValues { $0.value + 10 }
-            self.sensors      = allTemperatures
-            self.fans         = allFans
+            let cpu           = sensors.filter { $0.value.isCPU }.mapValues { $0.temperature }
+            let all           = sensors.mapValues { $0.temperature }
+            self.sensors      = all
             let names         = UserDefaults.standard.object( forKey: "selectedSensors" ) as? [ String ] ?? []
             let selectionMode = UserDefaults.standard.integer( forKey: "selectedSensorsMode" )
             let selected      = sensors.filter
@@ -131,7 +127,7 @@ public class ThermalLog: NSObject
             }
             .mapValues
             {
-                $0.value
+                $0.temperature
             }
 
             let temperatures: [ Double ] =
@@ -146,9 +142,9 @@ public class ThermalLog: NSObject
                 }
                 else
                 {
-                    let tcal = allTemperatures.first { $0.key.lowercased().hasSuffix( "tcal" ) }
+                    let tcal = all.first { $0.key.lowercased().hasSuffix( "tcal" ) }
 
-                    return allTemperatures.filter
+                    return all.filter
                     {
                         if $0.key.lowercased().hasSuffix( "tcal" )
                         {
@@ -188,28 +184,6 @@ public class ThermalLog: NSObject
             if temp > 1
             {
                 self.temperature = NSNumber( value: temp )
-            }
-
-            let fanSpeeds: [ Double ] =
-            {
-                return allFans.filter
-                {_ in 
-                     true
-                }
-                .values.map { $0 }
-            }()
-
-            let fanSpeed: Double =
-            {
-                return fanSpeeds.reduce( 0.0 )
-                {
-                    r, v in max( r, v )
-                }
-            }()
-
-            if !fanSpeed.isNaN
-            {
-                self.fanSpeed = NSNumber( value: fanSpeed )
             }
 
             let pipe            = Pipe()
